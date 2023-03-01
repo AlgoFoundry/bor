@@ -61,7 +61,7 @@ const (
 
 	// freezerBatchLimit is the maximum number of blocks to freeze in one batch
 	// before doing an fsync and deleting it from the key-value store.
-	freezerBatchLimit = 30000
+	freezerBatchLimit = 9
 
 	// freezerTableSize defines the maximum size of freezer data files.
 	freezerTableSize = 2 * 1000 * 1000 * 1000
@@ -269,6 +269,9 @@ func (f *freezer) ReadAncients(fn func(ethdb.AncientReader) error) (err error) {
 
 // ModifyAncients runs the given write operation.
 func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize int64, err error) {
+	disableWriteAncient := true
+
+	log.Info("[ucc] core -- rawdb -- freezer --- ModifyAncients -- called")
 	if f.readonly {
 		return 0, errReadOnly
 	}
@@ -288,6 +291,10 @@ func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 			}
 		}
 	}()
+
+	if disableWriteAncient == true {
+		return 0, nil
+	}
 
 	f.writeBatch.reset()
 	if err := fn(f.writeBatch); err != nil {
@@ -454,6 +461,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 		}
 		number := ReadHeaderNumber(nfdb, hash)
 		threshold := atomic.LoadUint64(&f.threshold)
+		log.Info("[ucc] core rawdb freezer --- freeze -- ", "hash", hash, "number", *number,  "threshold", threshold, "f.frozen", f.frozen)
 
 		switch {
 		case number == nil:
@@ -499,11 +507,44 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			log.Crit("Failed to flush frozen tables", "err", err)
 		}
 
-		// Wipe out all data from the active database
+		// Wipe out older data from the active database
+		batchActive := db.NewBatch()
+		timePrune := time.Now()
+
+		var activeHashes []common.Hash
+		var activeNumber uint64
+
+		headNumber := ReadHeaderNumber(nfdb, hash)
+
+		if *headNumber < 552120 {
+			log.Info("[ucc] active data still less than magic number ---- ")
+		} else {
+			endBlockToDelete := *headNumber - 552120
+			log.Info("[ucc] active data delete --- ", "start", 0, "end", endBlockToDelete)
+
+			for activeNumber = 0; activeNumber < endBlockToDelete; activeNumber++ {
+				// Always keep the genesis block in active database
+				if activeNumber != 0 {
+					activeHashes = ReadAllHashes(db, activeNumber)
+					for _, hash := range activeHashes {
+						DeleteBlock(batchActive, hash, activeNumber)
+					}
+				}
+			}
+	
+			if err := batchActive.Write(); err != nil {
+				log.Crit("[ucc] active data delete failed ---- ", "err", err)
+			}
+
+			log.Info("[ucc] active data delete duration --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+			
+			batchActive.Reset()
+		}
 		batch := db.NewBatch()
 		for i := 0; i < len(ancients); i++ {
 			// Always keep the genesis block in active database
 			if first+uint64(i) != 0 {
+				log.Info("[ucc] core rawdb freezer --- freeze -- deleting data # -- ancient ", "first", first,  "i", uint64(i), "first+uint64(i", first+uint64(i))
 				DeleteBlockWithoutNumber(batch, ancients[i], first+uint64(i))
 				DeleteCanonicalHash(batch, first+uint64(i))
 			}
