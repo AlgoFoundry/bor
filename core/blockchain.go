@@ -293,9 +293,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		rawdb.InitDatabaseFromFreezer(bc.db)
 		// If ancient database is not empty, reconstruct all missing
 		// indices in the background.
-		frozen, _ := bc.db.Ancients()
+		frozen, _ := bc.db.ItemAmountInAncient()
 		if frozen > 0 {
-			txIndexBlock = frozen
+			txIndexBlock, _ = bc.db.Ancients()
 		}
 	}
 	if err := bc.loadLastState(); err != nil {
@@ -332,7 +332,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 
 	// Ensure that a previous crash in SetHead doesn't leave extra ancients
-	if frozen, err := bc.db.Ancients(); err == nil && frozen > 0 {
+	if frozen, err := bc.db.ItemAmountInAncient(); err == nil && frozen > 0 {
+		frozen, err = bc.db.Ancients()
+		if err != nil {
+			return nil, err
+		}
 		var (
 			needRewind bool
 			low        uint64
@@ -406,6 +410,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	// Start tx indexer/unindexer.
 	if txLookupLimit != nil {
 		bc.txLookupLimit = *txLookupLimit
+		log.Info("[ucc] txLookupLimit ---- ", "txLookupLimit", bc.txLookupLimit)
 		bc.wg.Add(1)
 		go bc.maintainTxIndex(txIndexBlock)
 	}
@@ -444,6 +449,7 @@ func (bc *BlockChain) empty() bool {
 // assumes that the chain manager mutex is held.
 func (bc *BlockChain) loadLastState() error {
 	// Restore the last known head block
+	
 	head := rawdb.ReadHeadBlockHash(bc.db)
 	if head == (common.Hash{}) {
 		// Corrupt or empty database, init from scratch
@@ -452,11 +458,14 @@ func (bc *BlockChain) loadLastState() error {
 	}
 	// Make sure the entire head block is available
 	currentBlock := bc.GetBlockByHash(head)
+
 	if currentBlock == nil {
 		// Corrupt or empty database, init from scratch
 		log.Warn("Head block missing, resetting chain", "hash", head)
 		return bc.Reset()
 	}
+	log.Info("[ucc] loadLastState --- ", "currentBlock", currentBlock.NumberU64())
+
 	// Everything seems to be fine, set as the head block
 	bc.currentBlock.Store(currentBlock)
 	headBlockGauge.Update(int64(currentBlock.NumberU64()))
@@ -702,8 +711,6 @@ func (bc *BlockChain) Reset() error {
 // ResetWithGenesisBlock purges the entire blockchain, restoring it to the
 // specified genesis state.
 func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
-	log.Info("[ucc] core - blockchain -- ResetWithGenesisBlock called")
-
 	// Dump the entire block chain and purge the caches
 	if err := bc.SetHead(0); err != nil {
 		return err
@@ -983,7 +990,6 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		first := blockChain[0]
 		last := blockChain[len(blockChain)-1]
-
 		// Ensure genesis is in ancients.
 		if first.NumberU64() == 1 {
 			if frozen, _ := bc.db.Ancients(); frozen == 0 {
@@ -1017,6 +1023,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 		// Write all chain data to ancients.
 		td := bc.GetTd(first.Hash(), first.NumberU64())
+
 		writeSize, err := rawdb.WriteAncientBlocks(bc.db, blockChain, receiptChain, borReceipts, td)
 		size += writeSize
 		if err != nil {
@@ -1100,6 +1107,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		skipPresenceCheck := false
 		batch := bc.db.NewBatch()
 		headers := make([]*types.Header, 0, len(blockChain))
+
 		for i, block := range blockChain {
 			// Update the headers for bor specific reorg check
 			headers = append(headers, block.Header())
@@ -2353,6 +2361,7 @@ func (bc *BlockChain) skipBlock(err error, it *insertIterator) bool {
 	if bc.snaps.Snapshot(parentRoot) == nil {
 		return true
 	}
+
 	return false
 }
 

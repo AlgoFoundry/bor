@@ -13,7 +13,7 @@ syncmode = "full"
 # snapshot = true
 # "bor.logs" = false
 # ethstats = ""
-
+txlookuplimit = 2350000
 # ["eth.requiredblocks"]
 
 [p2p]
