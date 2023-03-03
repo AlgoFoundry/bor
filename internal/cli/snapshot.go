@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -395,6 +396,77 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 			log.Info("Selecting user-specified state as the pruning target", "root", targetRoot)
 		}
 	}
+
+	isDeleteActive := true
+	// ---
+	if isDeleteActive {
+		// Wipe out older data from the active database
+		batchActive := chaindb.NewBatch()
+		timePrune := time.Now()
+		timeCompactIteration := time.Now()
+
+		var activeHashes []common.Hash
+		var activeNumber, itDeleteActive uint64
+
+		// headNumber := rawdb.ReadHeaderNumber(nfdb, hash)
+		log.Info("[mike] got active data ----- ", "headBlock", headBlock.NumberU64())
+		headNumber := headBlock.NumberU64()
+
+		if headNumber < 552120 {
+			log.Info("[ucc] active data still less than magic number ---- ")
+		} else {
+			endBlockToDelete := headNumber - 552120
+			log.Info("[ucc] active data delete --- ", "start", 0, "end", endBlockToDelete)
+
+			for itDeleteActive = uint64(0); itDeleteActive < endBlockToDelete; itDeleteActive += 10000 {
+				timeCompactIteration = time.Now()
+
+				batchActive = chaindb.NewBatch()
+
+				for activeNumber = 0; activeNumber < endBlockToDelete; activeNumber++ {
+					// Always keep the genesis block in active database
+					if activeNumber != 0 {
+						activeHashes = rawdb.ReadAllHashes(chaindb, activeNumber)
+						for _, hash := range activeHashes {
+							rawdb.DeleteBlock(batchActive, hash, activeNumber)
+						}
+					}
+				}
+			
+				if err := batchActive.Write(); err != nil {
+					log.Crit("[ucc] active data delete failed ---- ", "err", err)
+				}
+
+				log.Info("[ucc] active data delete iteration --- ", "it", itDeleteActive, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
+					
+				batchActive.Reset()
+			}
+
+			log.Info("[ucc] active data delete completed --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+
+				
+			// --- compaction
+			cstart := time.Now()
+			for bCompact := 0x00; bCompact <= 0xf0; bCompact += 0x10 {
+				var (
+					startCompact = []byte{byte(bCompact)}
+					endCompact   = []byte{byte(bCompact + 0x10)}
+				)
+				if bCompact == 0xf0 {
+					endCompact = nil
+				}
+				log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+				if err := chaindb.Compact(startCompact, endCompact); err != nil {
+					log.Error("[ucc] Database compaction failed ---- ", "error", err)
+				}
+			}
+			log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(cstart)))
+
+			log.Info("[ucc] State pruning successful ---- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+			// --- end compaction
+		}
+	}
+	// --
 	return nil
 }
 
