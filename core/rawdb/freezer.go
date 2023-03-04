@@ -61,7 +61,9 @@ const (
 
 	// freezerBatchLimit is the maximum number of blocks to freeze in one batch
 	// before doing an fsync and deleting it from the key-value store.
-	freezerBatchLimit = 9 // mike
+	// freezerBatchLimit = 30000
+	freezerBatchLimit = 9
+	
 
 	// freezerTableSize defines the maximum size of freezer data files.
 	freezerTableSize = 2 * 1000 * 1000 * 1000
@@ -472,12 +474,13 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			}
 		}
 		// Retrieve the freezing threshold.
-		hash := ReadHeadBlockHash(db)
+		hash := ReadHeadBlockHash(nfdb)
 		if hash == (common.Hash{}) {
 			log.Debug("Current full block hash unavailable") // new chain, empty database
 			backoff = true
 			continue
 		}
+		
 		number := ReadHeaderNumber(nfdb, hash)
 		threshold := atomic.LoadUint64(&f.threshold)
 		log.Info("[ucc] core rawdb freezer --- freeze -- ", "hash", hash, "number", *number,  "threshold", threshold, "f.frozen", f.frozen)
@@ -529,6 +532,14 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 		}
 
 		if isDeleteActive {
+			/*
+			blockToSearch := uint64(460289) // *number - 552120
+			hashRead := ReadHash(nfdb, blockToSearch)
+			headerRead := ReadHeader(nfdb, hashRead, blockToSearch)
+			bodyRead := ReadBody(nfdb, hashRead, blockToSearch)
+			log.Info("[mike] headerRead --- ", "hashRead", hashRead, "blockToSearch", blockToSearch, "headerRead", headerRead, "bodyRead", bodyRead)
+			
+			/*
 			// Wipe out older data from the active database
 			batchActive := db.NewBatch()
 			timePrune := time.Now()
@@ -537,7 +548,8 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			var activeHashes []*NumberHash
 			var activeNumber, itDeleteActive uint64
 
-			headNumber := ReadHeaderNumber(nfdb, hash)
+			latestBlockHash := ReadHeadBlockHash(db)
+			headNumber := ReadHeaderNumber(db, latestBlockHash)
 
 			if *headNumber < 552120 {
 				log.Info("[ucc] active data still less than magic number ---- ")
@@ -571,7 +583,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 						log.Crit("[ucc] active data delete failed ---- ", "err", err)
 					}
 
-					log.Info("[ucc] active data delete staging delete --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
+					log.Info("[ucc] active data delete staging --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
 						
 					batchActive.Reset()
 				}
@@ -599,6 +611,8 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 				log.Info("[ucc] State pruning successful ---- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
 				// --- end compaction
 			}
+
+			*/
 
 		}
 

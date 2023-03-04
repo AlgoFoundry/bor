@@ -444,7 +444,7 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 					log.Crit("[ucc] active data delete failed ---- ", "err", err)
 				}
 
-				log.Info("[ucc] active data delete staging delete --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
+				log.Info("[ucc] active data delete staging --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
 					
 				batchActive.Reset()
 			}

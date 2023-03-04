@@ -109,6 +109,31 @@ func ReadAllHashesInRange(db ethdb.Iteratee, first, last uint64) []*NumberHash {
 	return hashes
 }
 
+// ReadHash retrieves hash assigned to particular blocks number
+func ReadHash(db ethdb.Iteratee, number uint64) common.Hash {
+	var (
+		hash 	  common.Hash
+		start     = encodeBlockNumber(number)
+		keyLength = len(headerPrefix) + 8 + 32
+		it        = db.NewIterator(headerPrefix, start)
+	)
+	defer it.Release()
+	for it.Next() {
+		key := it.Key()
+		if len(key) != keyLength {
+			continue
+		}
+		num := binary.BigEndian.Uint64(key[len(headerPrefix) : len(headerPrefix)+8])
+		log.Info("[mike] num --- ", "key", key, "num", num)
+		if num > number {
+			break
+		}
+		hash = common.BytesToHash(key[len(key)-32:])
+		log.Info("[mike] hash --- ", "hash", hash)
+	}
+	return hash
+}
+
 // ReadAllCanonicalHashes retrieves all canonical number and hash mappings at the
 // certain chain range. If the accumulated entries reaches the given threshold,
 // abort the iteration and return the semi-finish result.
