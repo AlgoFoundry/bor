@@ -532,49 +532,37 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 		}
 
 		if isDeleteActive {
-			/*
-			blockToSearch := uint64(460289) // *number - 552120
-			hashRead := ReadHash(nfdb, blockToSearch)
-			headerRead := ReadHeader(nfdb, hashRead, blockToSearch)
-			bodyRead := ReadBody(nfdb, hashRead, blockToSearch)
-			log.Info("[mike] headerRead --- ", "hashRead", hashRead, "blockToSearch", blockToSearch, "headerRead", headerRead, "bodyRead", bodyRead)
-			
-			/*
 			// Wipe out older data from the active database
-			batchActive := db.NewBatch()
-			timePrune := time.Now()
-			timeCompactIteration := time.Now()
-
 			var activeHashes []*NumberHash
-			var activeNumber, itDeleteActive uint64
+			var activeNumber uint64
 
-			latestBlockHash := ReadHeadBlockHash(db)
-			headNumber := ReadHeaderNumber(db, latestBlockHash)
+			blockToKeep 		:= uint64(552120)
+			blockToDelete		:= uint64(10000)
+			latestBlockHash 	:= ReadHeadBlockHash(nfdb)
+			latestBlockNumber	:= ReadHeaderNumber(nfdb, latestBlockHash)
 
-			if *headNumber < 552120 {
+			if *latestBlockNumber < blockToKeep {
 				log.Info("[ucc] active data still less than magic number ---- ")
+			} else if *latestBlockNumber < (blockToKeep + blockToDelete) {
+				log.Info("[ucc] active data delete require at least 10k from magic number ---- ")
 			} else {
-				endBlockToDelete := *headNumber - 552120
-				log.Info("[ucc] active data delete --- ", "start", 0, "end", endBlockToDelete)
+				deleteEnd 	:= *latestBlockNumber - blockToKeep
+				deleteStart := deleteEnd - blockToDelete
+	
+				log.Info("[ucc] active data delete, preparing --- ", "start", deleteStart, "end", deleteEnd)
 
-				for itDeleteActive = uint64(0); itDeleteActive < endBlockToDelete; itDeleteActive += 10000 {
-					timeCompactIteration = time.Now()
+				timePrune 	:= time.Now()
+				batchActive := db.NewBatch()
 
-					batchActive = db.NewBatch()
+				// keep block 0 genesis, start from block 1 instead
+				if deleteStart == 0 {
+					deleteStart += 1
+				}
 
-					deleteStart := itDeleteActive
-					// keep block 0 genesis, start from block 1 instead
-					if deleteStart == 0 {
-						deleteStart += 1
-					}
-
-					deleteEnd := itDeleteActive + 10000
-					if deleteEnd > endBlockToDelete {
-						deleteEnd = endBlockToDelete
-					}
-
-					activeHashes = ReadAllHashesInRange(db, deleteStart, deleteEnd)
-
+				activeHashes = ReadAllHashesInRange(nfdb, deleteStart, deleteEnd)
+				if len(activeHashes) == 0 {
+					log.Info("[ucc] cancelling active data delete, no active hashed to delete")
+				} else {
 					for _, hashes := range activeHashes {
 						DeleteBlock(batchActive, hashes.Hash, activeNumber)
 					}
@@ -582,38 +570,30 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 					if err := batchActive.Write(); err != nil {
 						log.Crit("[ucc] active data delete failed ---- ", "err", err)
 					}
-
-					log.Info("[ucc] active data delete staging --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
 						
 					batchActive.Reset()
-				}
-
-				log.Info("[ucc] active data delete completed --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
-
-					
-				// --- compaction
-				cstart := time.Now()
-				for bCompact := 0x00; bCompact <= 0xf0; bCompact += 0x10 {
-					var (
-						startCompact = []byte{byte(bCompact)}
-						endCompact   = []byte{byte(bCompact + 0x10)}
-					)
-					if bCompact == 0xf0 {
-						endCompact = nil
+	
+					log.Info("[ucc] active data delete completed --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+	
+					// compacting database
+					timeCompact := time.Now()
+					for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x10 {
+						cstart  := time.Now()
+						var (
+							startCompact = []byte{byte(bCompact)}
+							endCompact   = []byte{byte(bCompact + 0x10)}
+						)
+						if bCompact == 0xf0 {
+							endCompact = nil
+						}
+						log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+						if err := nfdb.Compact(startCompact, endCompact); err != nil {
+							log.Error("[ucc] Database compaction failed ---- ", "error", err)
+						}
 					}
-					log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
-					if err := db.Compact(startCompact, endCompact); err != nil {
-						log.Error("[ucc] Database compaction failed ---- ", "error", err)
-					}
+					log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
 				}
-				log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(cstart)))
-
-				log.Info("[ucc] State pruning successful ---- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
-				// --- end compaction
 			}
-
-			*/
-
 		}
 
 		batch := db.NewBatch()

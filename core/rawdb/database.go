@@ -294,6 +294,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, freezer string, namespace st
 			frdb.wg.Done()
 		}()
 	}
+	
 	return &freezerdb{
 		KeyValueStore: db,
 		AncientStore:  frdb,

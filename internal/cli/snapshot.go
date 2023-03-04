@@ -401,9 +401,11 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 	// ---
 	if isDeleteActive {
 		// Wipe out older data from the active database
-		batchActive := chaindb.NewBatch()
-		timePrune := time.Now()
-		timeCompactIteration := time.Now()
+		batchActive 			:= chaindb.NewBatch()
+		timePrune 				:= time.Now()
+		timeCompactIteration 	:= time.Now()
+		blockToKeep 			:= uint64(552120)
+		blockToDelete			:= uint64(10000)
 
 		var activeHashes []*rawdb.NumberHash
 		var activeNumber, itDeleteActive uint64
@@ -412,13 +414,13 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 		log.Info("[ucc] got active data ----- ", "headBlock", headBlock.NumberU64())
 		headNumber := headBlock.NumberU64()
 
-		if headNumber < 552120 {
+		if headNumber < blockToKeep {
 			log.Info("[ucc] active data still less than magic number ---- ")
 		} else {
-			endBlockToDelete := headNumber - 552120
+			endBlockToDelete := headNumber - blockToKeep
 			log.Info("[ucc] active data preparing to delete --- ", "start", 1, "end", endBlockToDelete)
 
-			for itDeleteActive = uint64(0); itDeleteActive < endBlockToDelete; itDeleteActive += 10000 {
+			for itDeleteActive = uint64(0); itDeleteActive < endBlockToDelete; itDeleteActive += blockToDelete {
 				timeCompactIteration = time.Now()
 
 				batchActive = chaindb.NewBatch()
@@ -429,7 +431,7 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 					deleteStart += 1
 				}
 
-				deleteEnd := itDeleteActive + 10000
+				deleteEnd := itDeleteActive + blockToDelete
 				if deleteEnd > endBlockToDelete {
 					deleteEnd = endBlockToDelete
 				}
