@@ -405,39 +405,46 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 		timePrune := time.Now()
 		timeCompactIteration := time.Now()
 
-		var activeHashes []common.Hash
+		var activeHashes []*rawdb.NumberHash
 		var activeNumber, itDeleteActive uint64
 
 		// headNumber := rawdb.ReadHeaderNumber(nfdb, hash)
-		log.Info("[mike] got active data ----- ", "headBlock", headBlock.NumberU64())
+		log.Info("[ucc] got active data ----- ", "headBlock", headBlock.NumberU64())
 		headNumber := headBlock.NumberU64()
 
 		if headNumber < 552120 {
 			log.Info("[ucc] active data still less than magic number ---- ")
 		} else {
 			endBlockToDelete := headNumber - 552120
-			log.Info("[ucc] active data delete --- ", "start", 0, "end", endBlockToDelete)
+			log.Info("[ucc] active data preparing to delete --- ", "start", 1, "end", endBlockToDelete)
 
 			for itDeleteActive = uint64(0); itDeleteActive < endBlockToDelete; itDeleteActive += 10000 {
 				timeCompactIteration = time.Now()
 
 				batchActive = chaindb.NewBatch()
 
-				for activeNumber = 0; activeNumber < endBlockToDelete; activeNumber++ {
-					// Always keep the genesis block in active database
-					if activeNumber != 0 {
-						activeHashes = rawdb.ReadAllHashes(chaindb, activeNumber)
-						for _, hash := range activeHashes {
-							rawdb.DeleteBlock(batchActive, hash, activeNumber)
-						}
-					}
+				deleteStart := itDeleteActive
+				// keep block 0 genesis, start from block 1 instead
+				if deleteStart == 0 {
+					deleteStart += 1
+				}
+
+				deleteEnd := itDeleteActive + 10000
+				if deleteEnd > endBlockToDelete {
+					deleteEnd = endBlockToDelete
+				}
+
+				activeHashes = rawdb.ReadAllHashesInRange(chaindb, deleteStart, deleteEnd)
+
+				for _, hashes := range activeHashes {
+					rawdb.DeleteBlock(batchActive, hashes.Hash, activeNumber)
 				}
 			
 				if err := batchActive.Write(); err != nil {
 					log.Crit("[ucc] active data delete failed ---- ", "err", err)
 				}
 
-				log.Info("[ucc] active data delete iteration --- ", "it", itDeleteActive, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
+				log.Info("[ucc] active data delete staging delete --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
 					
 				batchActive.Reset()
 			}

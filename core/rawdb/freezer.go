@@ -472,7 +472,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			}
 		}
 		// Retrieve the freezing threshold.
-		hash := ReadHeadBlockHash(nfdb)
+		hash := ReadHeadBlockHash(db)
 		if hash == (common.Hash{}) {
 			log.Debug("Current full block hash unavailable") // new chain, empty database
 			backoff = true
@@ -534,7 +534,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			timePrune := time.Now()
 			timeCompactIteration := time.Now()
 
-			var activeHashes []common.Hash
+			var activeHashes []*NumberHash
 			var activeNumber, itDeleteActive uint64
 
 			headNumber := ReadHeaderNumber(nfdb, hash)
@@ -550,21 +550,28 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 
 					batchActive = db.NewBatch()
 
-					for activeNumber = 0; activeNumber < endBlockToDelete; activeNumber++ {
-						// Always keep the genesis block in active database
-						if activeNumber != 0 {
-							activeHashes = ReadAllHashes(db, activeNumber)
-							for _, hash := range activeHashes {
-								DeleteBlock(batchActive, hash, activeNumber)
-							}
-						}
+					deleteStart := itDeleteActive
+					// keep block 0 genesis, start from block 1 instead
+					if deleteStart == 0 {
+						deleteStart += 1
+					}
+
+					deleteEnd := itDeleteActive + 10000
+					if deleteEnd > endBlockToDelete {
+						deleteEnd = endBlockToDelete
+					}
+
+					activeHashes = ReadAllHashesInRange(db, deleteStart, deleteEnd)
+
+					for _, hashes := range activeHashes {
+						DeleteBlock(batchActive, hashes.Hash, activeNumber)
 					}
 				
 					if err := batchActive.Write(); err != nil {
 						log.Crit("[ucc] active data delete failed ---- ", "err", err)
 					}
 
-					log.Info("[ucc] active data delete iteration --- ", "it", itDeleteActive, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
+					log.Info("[ucc] active data delete staging delete --- ", "start", deleteStart, "end", deleteEnd, "elapsed", common.PrettyDuration(time.Since(timeCompactIteration)))
 						
 					batchActive.Reset()
 				}
