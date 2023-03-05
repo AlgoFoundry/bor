@@ -192,15 +192,6 @@ web3._extend({
 			name: 'stopWS',
 			call: 'admin_stopWS'
 		}),
-		new web3._extend.Method({
-			name: 'getMaxPeers',
-			call: 'admin_getMaxPeers'
-		}),
-		new web3._extend.Method({
-			name: 'setMaxPeers',
-			call: 'admin_setMaxPeers',
-			params: 1
-		}),
 	],
 	properties: [
 		new web3._extend.Property({

@@ -61,7 +61,9 @@ const (
 
 	// freezerBatchLimit is the maximum number of blocks to freeze in one batch
 	// before doing an fsync and deleting it from the key-value store.
-	freezerBatchLimit = 30000
+	// freezerBatchLimit = 30000
+	freezerBatchLimit = 9
+	
 
 	// freezerTableSize defines the maximum size of freezer data files.
 	freezerTableSize = 2 * 1000 * 1000 * 1000
@@ -70,10 +72,10 @@ const (
 // freezer is a memory mapped append-only database to store immutable chain data
 // into flat files:
 //
-// - The append only nature ensures that disk writes are minimized.
-// - The memory mapping ensures we can max out system memory for caching without
-//   reserving it for go-ethereum. This would also reduce the memory requirements
-//   of Geth, and thus also GC overhead.
+//   - The append only nature ensures that disk writes are minimized.
+//   - The memory mapping ensures we can max out system memory for caching without
+//     reserving it for go-ethereum. This would also reduce the memory requirements
+//     of Geth, and thus also GC overhead.
 type freezer struct {
 	// WARNING: The `frozen` field is accessed atomically. On 32 bit platforms, only
 	// 64-bit aligned fields can be atomic. The struct is guaranteed to be so aligned,
@@ -96,6 +98,8 @@ type freezer struct {
 	quit      chan struct{}
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+
+	offset uint64 // Starting BlockNumber in current freezer
 }
 
 // newFreezer creates a chain freezer that moves ancient chain data into
@@ -103,7 +107,7 @@ type freezer struct {
 //
 // The 'tables' argument defines the data tables. If the value of a map
 // entry is true, snappy compression is disabled for the table.
-func newFreezer(datadir string, namespace string, readonly bool, maxTableSize uint32, tables map[string]bool) (*freezer, error) {
+func newFreezer(datadir string, namespace string, readonly bool, offset uint64, maxTableSize uint32, tables map[string]bool) (*freezer, error) {
 	// Create the initial freezer object
 	var (
 		readMeter  = metrics.NewRegisteredMeter(namespace+"ancient/read", nil)
@@ -131,6 +135,7 @@ func newFreezer(datadir string, namespace string, readonly bool, maxTableSize ui
 		instanceLock: lock,
 		trigger:      make(chan chan struct{}),
 		quit:         make(chan struct{}),
+		offset:       offset,
 	}
 
 	// Create the tables.
@@ -175,10 +180,14 @@ func newFreezer(datadir string, namespace string, readonly bool, maxTableSize ui
 		return nil, err
 	}
 
+	// Some blocks in ancientDB may have already been frozen and been pruned, so adding the offset to
+	// reprensent the absolute number of blocks already frozen.
+	freezer.frozen += offset
+
 	// Create the write batch.
 	freezer.writeBatch = newFreezerBatch(freezer)
 
-	log.Info("Opened ancient database", "database", datadir, "readonly", readonly)
+	log.Info("Opened ancient database", "database", datadir, "readonly", readonly, "frozen", freezer.frozen, "offset", freezer.offset)
 	return freezer, nil
 }
 
@@ -211,7 +220,7 @@ func (f *freezer) Close() error {
 // in the freezer.
 func (f *freezer) HasAncient(kind string, number uint64) (bool, error) {
 	if table := f.tables[kind]; table != nil {
-		return table.has(number), nil
+		return table.has(number - f.offset), nil
 	}
 	return false, nil
 }
@@ -219,16 +228,16 @@ func (f *freezer) HasAncient(kind string, number uint64) (bool, error) {
 // Ancient retrieves an ancient binary blob from the append-only immutable files.
 func (f *freezer) Ancient(kind string, number uint64) ([]byte, error) {
 	if table := f.tables[kind]; table != nil {
-		return table.Retrieve(number)
+		return table.Retrieve(number - f.offset)
 	}
 	return nil, errUnknownTable
 }
 
 // AncientRange retrieves multiple items in sequence, starting from the index 'start'.
 // It will return
-//  - at most 'max' items,
-//  - at least 1 item (even if exceeding the maxByteSize), but will otherwise
-//   return as many items as fit into maxByteSize.
+//   - at most 'max' items,
+//   - at least 1 item (even if exceeding the maxByteSize), but will otherwise
+//     return as many items as fit into maxByteSize.
 func (f *freezer) AncientRange(kind string, start, count, maxBytes uint64) ([][]byte, error) {
 	if table := f.tables[kind]; table != nil {
 		return table.RetrieveItems(start, count, maxBytes)
@@ -239,6 +248,16 @@ func (f *freezer) AncientRange(kind string, start, count, maxBytes uint64) ([][]
 // Ancients returns the length of the frozen items.
 func (f *freezer) Ancients() (uint64, error) {
 	return atomic.LoadUint64(&f.frozen), nil
+}
+
+// ItemAmountInAncient returns the actual length of current ancientDB.
+func (f *freezer) ItemAmountInAncient() (uint64, error) {
+	return atomic.LoadUint64(&f.frozen) - atomic.LoadUint64(&f.offset), nil
+}
+
+// AncientOffSet returns the offset of current ancientDB.
+func (f *freezer) AncientOffSet() uint64 {
+	return atomic.LoadUint64(&f.offset)
 }
 
 // Tail returns the number of first stored item in the freezer.
@@ -269,6 +288,9 @@ func (f *freezer) ReadAncients(fn func(ethdb.AncientReader) error) (err error) {
 
 // ModifyAncients runs the given write operation.
 func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize int64, err error) {
+	disableWriteAncient := true
+
+	log.Info("[ucc] core -- rawdb -- freezer --- ModifyAncients -- called")
 	if f.readonly {
 		return 0, errReadOnly
 	}
@@ -288,6 +310,10 @@ func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 			}
 		}
 	}()
+
+	if disableWriteAncient == true {
+		return 0, nil
+	}
 
 	f.writeBatch.reset()
 	if err := fn(f.writeBatch); err != nil {
@@ -313,7 +339,7 @@ func (f *freezer) TruncateHead(items uint64) error {
 		return nil
 	}
 	for _, table := range f.tables {
-		if err := table.truncateHead(items); err != nil {
+		if err := table.truncateHead(items - f.offset); err != nil {
 			return err
 		}
 	}
@@ -332,8 +358,9 @@ func (f *freezer) TruncateTail(tail uint64) error {
 	if atomic.LoadUint64(&f.tail) >= tail {
 		return nil
 	}
+
 	for _, table := range f.tables {
-		if err := table.truncateTail(tail); err != nil {
+		if err := table.truncateTail(tail - f.offset); err != nil {
 			return err
 		}
 	}
@@ -417,8 +444,9 @@ func (f *freezer) repair() error {
 // This functionality is deliberately broken off from block importing to avoid
 // incurring additional data shuffling delays on block propagation.
 func (f *freezer) freeze(db ethdb.KeyValueStore) {
-	nfdb := &nofreezedb{KeyValueStore: db}
+	isDeleteActive := true
 
+	nfdb := &nofreezedb{KeyValueStore: db}
 	var (
 		backoff   bool
 		triggered chan struct{} // Used in tests
@@ -452,8 +480,10 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			backoff = true
 			continue
 		}
+		
 		number := ReadHeaderNumber(nfdb, hash)
 		threshold := atomic.LoadUint64(&f.threshold)
+		log.Info("[ucc] core rawdb freezer --- freeze -- ", "hash", hash, "number", *number,  "threshold", threshold, "f.frozen", f.frozen)
 
 		switch {
 		case number == nil:
@@ -487,6 +517,8 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 		if limit-first > freezerBatchLimit {
 			limit = first + freezerBatchLimit
 		}
+		
+		log.Info("[ucc] core rawdb freezer --- freeze -- ", "first", first, "freezerBatchLimit", freezerBatchLimit, "limit", limit)
 		ancients, err := f.freezeRange(nfdb, first, limit)
 		if err != nil {
 			log.Error("Error in block freeze operation", "err", err)
@@ -499,13 +531,86 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			log.Crit("Failed to flush frozen tables", "err", err)
 		}
 
-		// Wipe out all data from the active database
+		if isDeleteActive {
+			// Wipe out older data from the active database
+			var activeHashes []*NumberHash
+			var activeNumber uint64
+
+			blockToKeep 		:= uint64(552120)
+			blockToDelete		:= uint64(10000)
+			latestBlockHash 	:= ReadHeadBlockHash(nfdb)
+			latestBlockNumber	:= ReadHeaderNumber(nfdb, latestBlockHash)
+
+			if *latestBlockNumber < blockToKeep {
+				log.Info("[ucc] active data still less than magic number ---- ")
+			} else if *latestBlockNumber < (blockToKeep + blockToDelete) {
+				log.Info("[ucc] active data delete require at least 10k from magic number ---- ")
+			} else {
+				deleteEnd 	:= *latestBlockNumber - blockToKeep
+				deleteStart := deleteEnd - blockToDelete
+	
+				log.Info("[ucc] active data delete, preparing --- ", "start", deleteStart, "end", deleteEnd)
+
+				timePrune 	:= time.Now()
+				batchActive := db.NewBatch()
+
+				// keep block 0 genesis, start from block 1 instead
+				if deleteStart == 0 {
+					deleteStart += 1
+				}
+
+				activeHashes = ReadAllHashesInRange(nfdb, deleteStart, deleteEnd)
+				if len(activeHashes) == 0 {
+					log.Info("[ucc] cancelling active data delete, no active hashed to delete")
+				} else {
+					for _, hashes := range activeHashes {
+						DeleteBlock(batchActive, hashes.Hash, activeNumber)
+					}
+				
+					if err := batchActive.Write(); err != nil {
+						log.Crit("[ucc] active data delete failed ---- ", "err", err)
+					}
+						
+					batchActive.Reset()
+	
+					log.Info("[ucc] active data delete completed --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+	
+					// compacting database
+					timeCompact := time.Now()
+					for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x10 {
+						cstart  := time.Now()
+						var (
+							startCompact = []byte{byte(bCompact)}
+							endCompact   = []byte{byte(bCompact + 0x10)}
+						)
+						if bCompact == 0xf0 {
+							endCompact = nil
+						}
+						log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+						if err := nfdb.Compact(startCompact, endCompact); err != nil {
+							log.Error("[ucc] Database compaction failed ---- ", "error", err)
+						}
+					}
+					log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
+				}
+			}
+		}
+
 		batch := db.NewBatch()
 		for i := 0; i < len(ancients); i++ {
 			// Always keep the genesis block in active database
 			if first+uint64(i) != 0 {
-				DeleteBlockWithoutNumber(batch, ancients[i], first+uint64(i))
+				log.Info("[ucc] core rawdb freezer --- freeze -- deleting data # -- ancient ", "first", first,  "i", uint64(i), "first+uint64(i", first+uint64(i))
+
+				// rawdb.DeleteCanonicalHash(batch, block.NumberU64())
+				// rawdb.DeleteBlockWithoutNumber(batch, block.Hash(), block.NumberU64())
+	
+				// func DeleteBlockWithoutNumber(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
+
+				DeleteBlockWithoutNumber(batch, ancients[i], first+uint64(i)) 
 				DeleteCanonicalHash(batch, first+uint64(i))
+			} else {
+				log.Info("[ucc] core rawdb freezer --- freeze -- deleting data # -- keeping genesis on # ", uint64(i))
 			}
 		}
 		if err := batch.Write(); err != nil {
@@ -572,6 +677,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			context = append(context, []interface{}{"hash", ancients[n-1]}...)
 		}
 		log.Info("Deep froze chain segment", context...)
+		log.Info("[ucc] checking thrashing with tiny writes --- ", "f.frozen-first", f.frozen-first, "freezerBatchLimit", freezerBatchLimit, "f.frozen-first < freezerBatchLimit", f.frozen-first < freezerBatchLimit)
 
 		// Avoid database thrashing with tiny writes
 		if f.frozen-first < freezerBatchLimit {
@@ -582,6 +688,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 
 func (f *freezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []common.Hash, err error) {
 	hashes = make([]common.Hash, 0, limit-number)
+	log.Info("[ucc] freezeRange called --- ", "number", number, "limit", limit, "hashes", hashes)
 
 	_, err = f.ModifyAncients(func(op ethdb.AncientWriteOp) error {
 		for ; number <= limit; number++ {
@@ -695,7 +802,7 @@ func (f *freezer) MigrateTable(kind string, convert convertLegacyFn) error {
 		return err
 	}
 	var (
-		batch  = newTable.newBatch()
+		batch  = newTable.newBatch(f.offset)
 		out    []byte
 		start  = time.Now()
 		logged = time.Now()
