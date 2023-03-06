@@ -168,6 +168,10 @@ func (hc *HeaderChain) Reorg(headers []*types.Header) error {
 			headHash   = header.Hash()
 		)
 		for rawdb.ReadCanonicalHash(hc.chainDb, headNumber) != headHash {
+			// [bsc] exit if frozen ancient same as the last block
+			if frozen, _ := hc.chainDb.Ancients(); frozen == headNumber {
+				break
+			}
 			rawdb.WriteCanonicalHash(batch, headHash, headNumber)
 			if headNumber == 0 {
 				break // It shouldn't be reached

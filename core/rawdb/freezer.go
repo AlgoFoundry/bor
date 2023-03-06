@@ -61,7 +61,10 @@ const (
 
 	// freezerBatchLimit is the maximum number of blocks to freeze in one batch
 	// before doing an fsync and deleting it from the key-value store.
-	freezerBatchLimit = 30000
+	// freezerBatchLimit = 30000
+	// [mys] reducing freezer batch limit for less resource usage and faster sync (to avoid db corruption upon killed)
+	freezerBatchLimit = 9
+	
 
 	// freezerTableSize defines the maximum size of freezer data files.
 	freezerTableSize = 2 * 1000 * 1000 * 1000
@@ -96,6 +99,7 @@ type freezer struct {
 	quit      chan struct{}
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+	offset uint64 // [bsc] Starting BlockNumber in current freezer
 }
 
 // newFreezer creates a chain freezer that moves ancient chain data into
@@ -103,7 +107,7 @@ type freezer struct {
 //
 // The 'tables' argument defines the data tables. If the value of a map
 // entry is true, snappy compression is disabled for the table.
-func newFreezer(datadir string, namespace string, readonly bool, maxTableSize uint32, tables map[string]bool) (*freezer, error) {
+func newFreezer(datadir string, namespace string, readonly bool, offset uint64, maxTableSize uint32, tables map[string]bool) (*freezer, error) {
 	// Create the initial freezer object
 	var (
 		readMeter  = metrics.NewRegisteredMeter(namespace+"ancient/read", nil)
@@ -131,6 +135,7 @@ func newFreezer(datadir string, namespace string, readonly bool, maxTableSize ui
 		instanceLock: lock,
 		trigger:      make(chan chan struct{}),
 		quit:         make(chan struct{}),
+		offset:       offset, // [bsc] additional offset support
 	}
 
 	// Create the tables.
@@ -175,6 +180,10 @@ func newFreezer(datadir string, namespace string, readonly bool, maxTableSize ui
 		return nil, err
 	}
 
+	// [bsc] Some blocks in ancientDB may have already been frozen and been pruned, so adding the offset to
+	// reprensent the absolute number of blocks already frozen.
+	freezer.frozen += offset
+
 	// Create the write batch.
 	freezer.writeBatch = newFreezerBatch(freezer)
 
@@ -211,7 +220,8 @@ func (f *freezer) Close() error {
 // in the freezer.
 func (f *freezer) HasAncient(kind string, number uint64) (bool, error) {
 	if table := f.tables[kind]; table != nil {
-		return table.has(number), nil
+		// [bsc] putting offset into consideration
+		return table.has(number - f.offset), nil
 	}
 	return false, nil
 }
@@ -219,7 +229,8 @@ func (f *freezer) HasAncient(kind string, number uint64) (bool, error) {
 // Ancient retrieves an ancient binary blob from the append-only immutable files.
 func (f *freezer) Ancient(kind string, number uint64) ([]byte, error) {
 	if table := f.tables[kind]; table != nil {
-		return table.Retrieve(number)
+		// [bsc] putting offset into consideration
+		return table.Retrieve(number - f.offset)
 	}
 	return nil, errUnknownTable
 }
@@ -239,6 +250,16 @@ func (f *freezer) AncientRange(kind string, start, count, maxBytes uint64) ([][]
 // Ancients returns the length of the frozen items.
 func (f *freezer) Ancients() (uint64, error) {
 	return atomic.LoadUint64(&f.frozen), nil
+}
+
+// [bsc] ItemAmountInAncient returns the actual length of current ancientDB.
+func (f *freezer) ItemAmountInAncient() (uint64, error) {
+	return atomic.LoadUint64(&f.frozen) - atomic.LoadUint64(&f.offset), nil
+}
+
+// [bsc] AncientOffSet returns the offset of current ancientDB.
+func (f *freezer) AncientOffSet() uint64 {
+	return atomic.LoadUint64(&f.offset)
 }
 
 // Tail returns the number of first stored item in the freezer.
@@ -269,6 +290,10 @@ func (f *freezer) ReadAncients(fn func(ethdb.AncientReader) error) (err error) {
 
 // ModifyAncients runs the given write operation.
 func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize int64, err error) {
+	// [mys] by default disabling write ancient. Enable this to perform ancient db write
+	disableWriteAncient := true
+
+	log.Info("[ucc] core -- rawdb -- freezer --- ModifyAncients -- called")
 	if f.readonly {
 		return 0, errReadOnly
 	}
@@ -288,6 +313,10 @@ func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 			}
 		}
 	}()
+	// [mys] return when write ancient db disabled
+	if disableWriteAncient == true {
+		return 0, nil
+	}
 
 	f.writeBatch.reset()
 	if err := fn(f.writeBatch); err != nil {
@@ -313,7 +342,8 @@ func (f *freezer) TruncateHead(items uint64) error {
 		return nil
 	}
 	for _, table := range f.tables {
-		if err := table.truncateHead(items); err != nil {
+		// [bsc] truncatehead with offset as consideration
+		if err := table.truncateHead(items - f.offset); err != nil {
 			return err
 		}
 	}
@@ -333,7 +363,8 @@ func (f *freezer) TruncateTail(tail uint64) error {
 		return nil
 	}
 	for _, table := range f.tables {
-		if err := table.truncateTail(tail); err != nil {
+		// [bsc] truncate from tail with offset as consideration
+		if err := table.truncateTail(tail - f.offset); err != nil {
 			return err
 		}
 	}
@@ -417,6 +448,8 @@ func (f *freezer) repair() error {
 // This functionality is deliberately broken off from block importing to avoid
 // incurring additional data shuffling delays on block propagation.
 func (f *freezer) freeze(db ethdb.KeyValueStore) {
+	// [mys] by default, enabling real time active data pruning
+	isDeleteActive := true
 	nfdb := &nofreezedb{KeyValueStore: db}
 
 	var (
@@ -499,7 +532,71 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			log.Crit("Failed to flush frozen tables", "err", err)
 		}
 
-		// Wipe out all data from the active database
+		if isDeleteActive {
+			// [mys] Wipe out older data from the active database
+			var activeHashes []*NumberHash
+			var activeNumber uint64
+
+			blockToKeep 		:= uint64(552120)
+			blockToDelete		:= uint64(10000)
+			latestBlockHash 	:= ReadHeadBlockHash(nfdb)
+			latestBlockNumber	:= ReadHeaderNumber(nfdb, latestBlockHash)
+
+			if *latestBlockNumber < blockToKeep {
+				log.Info("[ucc] active data still less than magic number ---- ")
+			} else if *latestBlockNumber < (blockToKeep + blockToDelete) {
+				log.Info("[ucc] active data delete require at least 10k from magic number ---- ")
+			} else {
+				deleteEnd 	:= *latestBlockNumber - blockToKeep
+				deleteStart := deleteEnd - blockToDelete
+	
+				log.Info("[ucc] active data delete, preparing --- ", "start", deleteStart, "end", deleteEnd)
+
+				timePrune 	:= time.Now()
+				batchActive := db.NewBatch()
+
+				// keep block 0 genesis, start from block 1 instead
+				if deleteStart == 0 {
+					deleteStart += 1
+				}
+
+				activeHashes = ReadAllHashesInRange(nfdb, deleteStart, deleteEnd)
+				if len(activeHashes) == 0 {
+					log.Info("[ucc] cancelling active data delete, no active hashed to delete")
+				} else {
+					for _, hashes := range activeHashes {
+						DeleteBlock(batchActive, hashes.Hash, activeNumber)
+					}
+				
+					if err := batchActive.Write(); err != nil {
+						log.Crit("[ucc] active data delete failed ---- ", "err", err)
+					}
+						
+					batchActive.Reset()
+	
+					log.Info("[ucc] active data delete completed --- ", "elapsed", common.PrettyDuration(time.Since(timePrune)))
+	
+					// compacting database
+					timeCompact := time.Now()
+					for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x10 {
+						cstart  := time.Now()
+						var (
+							startCompact = []byte{byte(bCompact)}
+							endCompact   = []byte{byte(bCompact + 0x10)}
+						)
+						if bCompact == 0xf0 {
+							endCompact = nil
+						}
+						log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+						if err := nfdb.Compact(startCompact, endCompact); err != nil {
+							log.Error("[ucc] Database compaction failed ---- ", "error", err)
+						}
+					}
+					log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
+				}
+			}
+		}
+
 		batch := db.NewBatch()
 		for i := 0; i < len(ancients); i++ {
 			// Always keep the genesis block in active database
@@ -695,7 +792,7 @@ func (f *freezer) MigrateTable(kind string, convert convertLegacyFn) error {
 		return err
 	}
 	var (
-		batch  = newTable.newBatch()
+		batch  = newTable.newBatch(f.offset) // [bsc] putting offset as consideration
 		out    []byte
 		start  = time.Now()
 		logged = time.Now()

@@ -199,6 +199,12 @@ func Commands() map[string]MarkDownCommandFactory {
 				Meta: meta,
 			}, nil
 		},
+		// [bsc] adding prune-block cli feature
+		"snapshot prune-block": func() (MarkDownCommand, error) {
+			return &PruneBlockCommand{
+				Meta: meta,
+			}, nil
+		},
 	}
 }
 

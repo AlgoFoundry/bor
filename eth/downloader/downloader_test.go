@@ -64,6 +64,7 @@ func newTester() *downloadTester {
 		panic(err)
 	}
 
+	// [bsc] adding disabledFreeze and isLastOffset param
 	db, err := rawdb.NewDatabaseWithFreezer(rawdb.NewMemoryDatabase(), freezer, "", false)
 	if err != nil {
 		panic(err)
