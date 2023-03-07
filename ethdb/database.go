@@ -93,6 +93,12 @@ type AncientReader interface {
 
 	// AncientSize returns the ancient size of the specified category.
 	AncientSize(kind string) (uint64, error)
+
+	// [bsc] ItemAmountInAncient returns the actual length of current ancientDB.
+	ItemAmountInAncient() (uint64, error)
+
+	// [bsc] AncientOffSet returns the offset of current ancientDB.
+	AncientOffSet() uint64
 }
 
 // AncientBatchReader is the interface for 'batched' or 'atomic' reading.
