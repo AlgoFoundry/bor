@@ -457,18 +457,9 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 				
 			// --- compaction
 			cstart := time.Now()
-			for bCompact := 0x00; bCompact <= 0xf0; bCompact += 0x10 {
-				var (
-					startCompact = []byte{byte(bCompact)}
-					endCompact   = []byte{byte(bCompact + 0x10)}
-				)
-				if bCompact == 0xf0 {
-					endCompact = nil
-				}
-				log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
-				if err := chaindb.Compact(startCompact, endCompact); err != nil {
-					log.Error("[ucc] Database compaction failed ---- ", "error", err)
-				}
+
+			if err := chaindb.Compact(nil, nil); err != nil {
+				log.Error("[ucc] Database compaction failed ---- ", "error", err)
 			}
 			log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(cstart)))
 
