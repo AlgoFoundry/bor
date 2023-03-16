@@ -578,10 +578,24 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 	
 					// compacting database
 					timeCompact := time.Now()
-					if err := nfdb.Compact(nil, nil); err != nil {
-						log.Error("[ucc] Database compaction failed ---- ", "error", err)
+					log.Info("[ucc] Compacting database ---- ")
+					// if err := nfdb.Compact(nil, nil); err != nil {
+					//  	log.Error("[ucc] Database compaction failed ---- ", "error", err)
+					// }
+					for bCompact := 0xa0; bCompact <= 0xf0; bCompact += 0x02 {
+						cstart  := time.Now()
+						var (
+							startCompact = []byte{byte(bCompact)}
+							endCompact   = []byte{byte(bCompact + 0x02)}
+						)
+						if bCompact == 0xf0 {
+							endCompact = nil
+						}
+						log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+						if err := nfdb.Compact(startCompact, endCompact); err != nil {
+							log.Error("[ucc] Database compaction failed ---- ", "error", err)
+						}
 					}
-
 					log.Info("[ucc] Database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
 				}
 			}
