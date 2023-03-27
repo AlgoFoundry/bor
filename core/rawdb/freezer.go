@@ -186,8 +186,8 @@ func newFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 
 	// Create the write batch.
 	freezer.writeBatch = newFreezerBatch(freezer)
-
-	log.Info("Opened ancient database", "database", datadir, "readonly", readonly)
+	// [mys] additional log added
+	log.Info("Opened ancient database", "database", datadir, "readonly", readonly, "frozen", freezer.frozen, "offset", freezer.offset)
 	return freezer, nil
 }
 
@@ -578,11 +578,15 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 	
 					// compacting database
 					timeCompact := time.Now()
-					for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x10 {
+					log.Info("[ucc] Compacting database ---- ")
+					// if err := nfdb.Compact(nil, nil); err != nil {
+					//  	log.Error("[ucc] Database compaction failed ---- ", "error", err)
+					// }
+					for bCompact := 0xa0; bCompact <= 0xf0; bCompact += 0x02 {
 						cstart  := time.Now()
 						var (
 							startCompact = []byte{byte(bCompact)}
-							endCompact   = []byte{byte(bCompact + 0x10)}
+							endCompact   = []byte{byte(bCompact + 0x02)}
 						)
 						if bCompact == 0xf0 {
 							endCompact = nil

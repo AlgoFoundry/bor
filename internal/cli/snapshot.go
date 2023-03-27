@@ -35,6 +35,7 @@ func (a *SnapshotCommand) MarkDown() string {
 		"# snapshot",
 		"The ```snapshot``` command groups snapshot related actions:",
 		"- [```snapshot prune-state```](./snapshot_prune-state.md): Prune state databases at the given datadir location.",
+		"- [```snapshot prune-block```](./snapshot_prune-block.md): Prune ancient chaindata at the given datadir location.",
 	}
 
 	return strings.Join(items, "\n\n")
@@ -48,7 +49,11 @@ func (c *SnapshotCommand) Help() string {
 
   Prune the state trie:
 
-    $ bor snapshot prune-state`
+    $ bor snapshot prune-state
+
+  Prune the ancient data:
+
+    $ bor snapshot prune-block`
 }
 
 // Synopsis implements the cli.Command interface
@@ -177,6 +182,9 @@ func (c *PruneStateCommand) Run(args []string) int {
 		c.UI.Error(err.Error())
 		return 1
 	}
+	// [mys] additional log added to show headblock exist or not
+	headBlock := rawdb.ReadHeadBlock(chaindb)
+	log.Info("[ucc] pruneState run -- ", "headBlock", headBlock)
 
 	pruner, err := pruner.NewPruner(chaindb, node.ResolvePath(""), node.ResolvePath(c.cacheTrieJournal), c.bloomfilterSize)
 	if err != nil {
@@ -205,8 +213,16 @@ type PruneBlockCommand struct {
 // MarkDown implements cli.MarkDown interface
 func (c *PruneBlockCommand) MarkDown() string {
 	items := []string{
-		"# Prune block",
-		"The ```bor snapshot prune-block``` command will prune ancient blockchain offline",
+		"# Prune ancient blockchain",
+		"The ```bor snapshot prune-block``` command will prune historical blockchain data stored in the ancientdb. The amount of blocks expected for remaining after prune can be specified via `block-amount-reserved` in this command, will prune and only remain the specified amount of old block data in ancientdb.",
+		`
+The brief workflow as below:
+
+1. backup the the number of specified number of blocks backward in original ancientdb into new ancient_backup,
+2. then delete the original ancientdb dir and rename the ancient_backup to original one for replacement,
+3. finally assemble the statedb and new ancientdb together.
+
+The purpose of doing it is because the block data will be moved into the ancient store when it becomes old enough(exceed the Threshold 90000), the disk usage will be very large over time, and is occupied mainly by ancientdb, so it's very necessary to do block data pruning, this feature will handle it.`,
 		c.Flags().MarkDown(),
 	}
 
@@ -457,7 +473,13 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 				
 			// --- compaction
 			cstart := time.Now()
-			for bCompact := 0x00; bCompact <= 0xf0; bCompact += 0x10 {
+			log.Info("[ucc] active data compacting start... ")
+
+			// if err := chaindb.Compact(nil, nil); err != nil {
+			// 	log.Error("[ucc] Database compaction failed ---- ", "error", err)
+			// }
+			for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x10 {
+				cstart  := time.Now()
 				var (
 					startCompact = []byte{byte(bCompact)}
 					endCompact   = []byte{byte(bCompact + 0x10)}
@@ -466,6 +488,7 @@ func (c *PruneBlockCommand) accessDb(stack *node.Node, dbHandles int) error {
 					endCompact = nil
 				}
 				log.Info("[ucc] Compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact), "elapsed", common.PrettyDuration(time.Since(cstart)))
+				// [mys] bugfix upon compacting database
 				if err := chaindb.Compact(startCompact, endCompact); err != nil {
 					log.Error("[ucc] Database compaction failed ---- ", "error", err)
 				}

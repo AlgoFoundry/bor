@@ -706,6 +706,16 @@ func (vals *ValidatorSet) StringIndented(indent string) string {
 		indent)
 }
 
+// [mys] additional function for votings
+func (vals *ValidatorSet) SetTotalVotingPower(totalVotingPower int64) {
+	vals.totalVotingPower = totalVotingPower
+}
+
+// [mys] additional function for remapping the validator
+func (vals *ValidatorSet) SetMap(validatorsMap map[common.Address]int) {
+	vals.validatorsMap = validatorsMap
+}
+
 //-------------------------------------
 // Implements sort for sorting validators by address.
 
