@@ -24,7 +24,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // BlockValidator is responsible for validating block headers, uncles and
@@ -80,9 +79,6 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 // itself. ValidateState returns a database batch if the validation was a success
 // otherwise nil and an error is returned.
 func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64) error {
-	// [mys] by default, deleting bad block is set as true
-	isDeleteMerkleErrorBlock := true
-
 	header := block.Header()
 	if block.GasUsed() != usedGas {
 		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
@@ -101,20 +97,6 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
 	if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
-		// [mys] additional logic for deleting bad blocks
-		if isDeleteMerkleErrorBlock == true {
-			errorBlockHash := v.bc.GetBlockByNumber(block.NumberU64())
-
-			log.Info("[ucc] deleting merkle bad block from db --- ", "number", block.NumberU64(), "errorBlock", errorBlockHash)
-
-			batchDuplicatedBlock := statedb.NewBatch()
-			bc.DeleteBlock(batchDuplicatedBlock, statedb.Hash(), statedb.NumberU64())				
-			batchDuplicatedBlock.Reset()
-			
-			log.Info("[ucc] clearing all bad blocks list")
-			DeleteBadBlocks(db)
-		}
-
 		return fmt.Errorf("invalid merkle root (remote: %x local: %x)", header.Root, root)
 	}
 	return nil
