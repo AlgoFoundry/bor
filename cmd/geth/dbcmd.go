@@ -372,8 +372,8 @@ func inspect(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
 	return rawdb.InspectDatabase(db, prefix, start)
@@ -395,8 +395,8 @@ func showLeveldbStats(db ethdb.Stater) {
 func dbStats(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
 	showLeveldbStats(db)
@@ -406,8 +406,8 @@ func dbStats(ctx *cli.Context) error {
 func dbCompact(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
 	log.Info("Stats before compaction")
@@ -430,8 +430,8 @@ func dbGet(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
 	key, err := parseHexOrString(ctx.Args().Get(0))
@@ -456,8 +456,8 @@ func dbDelete(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
 	key, err := parseHexOrString(ctx.Args().Get(0))
@@ -483,8 +483,8 @@ func dbPut(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
 	var (
@@ -517,8 +517,8 @@ func dbDumpTrie(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 	var (
 		root  []byte
@@ -639,7 +639,8 @@ func importLDBdata(ctx *cli.Context) error {
 		}
 		close(stop)
 	}()
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	return utils.ImportLDBData(db, fName, int64(start), stop)
 }
 
@@ -735,14 +736,16 @@ func exportChaindata(ctx *cli.Context) error {
 		}
 		close(stop)
 	}()
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	return utils.ExportChaindata(ctx.Args().Get(1), kind, exporter(db), stop)
 }
 
 func showMetaData(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	ancients, err := db.Ancients()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error accessing ancients: %v", err)
@@ -792,8 +795,8 @@ func showMetaData(ctx *cli.Context) error {
 func freezerMigrate(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
 	// Check first block for legacy receipt format

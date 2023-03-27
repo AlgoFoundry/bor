@@ -2455,8 +2455,9 @@ func (bc *BlockChain) maintainTxIndex(ancients uint64) {
 }
 
 // reportBlock logs a bad block error.
-func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
-	rawdb.WriteBadBlock(bc.db, block)
+// [mys] returning boolean response whether duplicated block occurs
+func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) bool {
+	isDuplicationOccurs := rawdb.WriteBadBlock(bc.db, block)
 
 	var receiptString string
 	for i, receipt := range receipts {
@@ -2475,6 +2476,7 @@ Hash: 0x%x
 Error: %v
 ##############################
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err))
+	return isDuplicationOccurs
 }
 
 // InsertHeaderChain attempts to insert the given header chain in to the local

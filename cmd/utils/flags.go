@@ -1806,7 +1806,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			}
 			// Check if we have an already initialized chain and fall back to
 			// that if so. Otherwise we need to generate a new genesis spec.
-			chaindb := MakeChainDatabase(ctx, stack, readonly)
+			// [mys] additional param added
+			chaindb := MakeChainDatabase(ctx, stack, readonly, false)
 			if rawdb.ReadCanonicalHash(chaindb, 0) != (common.Hash{}) {
 				cfg.Genesis = nil // fallback to db content
 			}
@@ -1965,8 +1966,9 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 	return tagsMap
 }
 
+// [mys] additional param added
 // MakeChainDatabase open an LevelDB using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
+func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
 	var (
 		cache   = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheDatabaseFlag.Name) / 100
 		handles = MakeDatabaseHandles(ctx.GlobalInt(FDLimitFlag.Name))
@@ -1980,7 +1982,8 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 	} else {
 		name := "chaindata"
 		// open db as freezer with disabled freeze, and no interruption
-		chainDb, err = stack.OpenDatabaseWithFreezer(name, cache, handles, ctx.GlobalString(AncientFlag.Name), "", readonly, false, false)
+		// [mys] additional param added
+		chainDb, err = stack.OpenDatabaseWithFreezer(name, cache, handles, ctx.GlobalString(AncientFlag.Name), "", readonly, disableFreeze, false)
 	}
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
@@ -2020,8 +2023,8 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 	if err != nil {
 		Fatalf("Valid genesis file is required as argument: {}", err)
 	}
-
-	chainDb = MakeChainDatabase(ctx, stack, false) // TODO(rjl493456442) support read-only database
+	// [mys] additional param added
+	chainDb = MakeChainDatabase(ctx, stack, false, false) // TODO(rjl493456442) support read-only database
 	config, _, err := core.SetupGenesisBlock(chainDb, genesis)
 	if err != nil {
 		Fatalf("%v", err)
@@ -2038,6 +2041,8 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 			HeimdallgRPCAddress: ctx.GlobalString(HeimdallgRPCAddressFlag.Name),
 			RunHeimdall:         ctx.GlobalBool(RunHeimdallFlag.Name),
 			RunHeimdallArgs:     ctx.GlobalString(RunHeimdallArgsFlag.Name),
+			// [mys] additional config to allow using internal heimdall data for fetching
+			UseHeimdallApp:      ctx.GlobalBool(UseHeimdallAppFlag.Name),
 		})
 		engine = ethereum.Engine()
 	} else {

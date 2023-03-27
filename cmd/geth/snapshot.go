@@ -194,8 +194,15 @@ block is used.
 func pruneState(ctx *cli.Context) error {
 	stack, config := makeConfigNode(ctx)
 	defer stack.Close()
+	// [mys] updating prune state cli to avoid proceeding when head block not readable
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	headBlock := rawdb.ReadHeadBlock(chaindb)
+	log.Info("[ucc] pruneState -- ", "headBlock", headBlock)
+	if headBlock == nil {
+		log.Error("Failed to load head block")
+		return errors.New("no head block")
+	}
 
-	chaindb := utils.MakeChainDatabase(ctx, stack, false)
 	pruner, err := pruner.NewPruner(chaindb, stack.ResolvePath(""), stack.ResolvePath(config.Eth.TrieCleanCacheJournal), ctx.GlobalUint64(utils.BloomFilterSizeFlag.Name))
 	if err != nil {
 		log.Error("Failed to open snapshot tree", "err", err)
@@ -223,8 +230,8 @@ func pruneState(ctx *cli.Context) error {
 func verifyState(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	chaindb := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	headBlock := rawdb.ReadHeadBlock(chaindb)
 	if headBlock == nil {
 		log.Error("Failed to load head block")
@@ -261,8 +268,8 @@ func verifyState(ctx *cli.Context) error {
 func traverseState(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	chaindb := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	headBlock := rawdb.ReadHeadBlock(chaindb)
 	if headBlock == nil {
 		log.Error("Failed to load head block")
@@ -350,8 +357,8 @@ func traverseState(ctx *cli.Context) error {
 func traverseRawState(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	chaindb := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	headBlock := rawdb.ReadHeadBlock(chaindb)
 	if headBlock == nil {
 		log.Error("Failed to load head block")

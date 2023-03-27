@@ -359,8 +359,8 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 	// Open old db wrapper.
 	chainDb, err := p.node.OpenDatabaseWithFreezer(name, cache, handles, p.oldAncientPath, namespace, readonly, true, interrupt)
 	if err != nil {
-		log.Error("Failed to open ancient database", "err", err)
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("Failed to open ancient database %v", err)
 	}
 	defer chainDb.Close()
 	log.Info("chainDB opened successfully")
@@ -377,8 +377,11 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 
 	// If the items in freezer is less than the block amount that we want to reserve, it is not enough, should stop.
 	if itemsOfAncient < p.BlockAmountReserved {
-		log.Error("the number of old blocks is not enough to reserve,", "ancient items", itemsOfAncient, "the amount specified", p.BlockAmountReserved)
-		return errors.New("the number of old blocks is not enough to reserve")
+		// [mys] returning text errors
+		return fmt.Errorf("the number of old blocks is not enough to reserve, ancientItems=%d, specifiedReservedBlockAmount=%d", itemsOfAncient, p.BlockAmountReserved)
+	} else if itemsOfAncient == p.BlockAmountReserved {
+		// [mys] returning text errors
+		return fmt.Errorf("the number of old blocks is the same to reserved blocks, ancientItems=%d", itemsOfAncient)
 	}
 
 	var oldOffSet uint64
@@ -401,8 +404,8 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 	// For every round, newoffset actually equals to the startBlockNumber in ancient backup db.
 	frdbBack, err := rawdb.NewFreezerDb(chainDb, p.newAncientPath, namespace, readonly, startBlockNumber)
 	if err != nil {
-		log.Error("Failed to create ancient freezer backup", "err", err)
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("Failed to create ancient freezer backup: %v", err)
 	}
 	defer frdbBack.Close()
 
@@ -416,10 +419,9 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 	// It's guaranteed that the old/new offsets are updated as well as the new ancientDB are created if this flock exist.
 	lock, _, err := fileutil.Flock(filepath.Join(p.newAncientPath, "PRUNEFLOCKBACK"))
 	if err != nil {
-		log.Error("file lock error", "err", err)
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("file lock error: %v", err)
 	}
-
 	log.Info("prune info", "old offset", oldOffSet, "number of items in ancientDB", itemsOfAncient, "amount to reserve", p.BlockAmountReserved)
 	log.Info("new offset/new startBlockNumber recorded successfully ", "new offset", startBlockNumber)
 
@@ -429,7 +431,8 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 		blockHash := rawdb.ReadCanonicalHash(chainDb, blockNumber)
 		block := rawdb.ReadBlock(chainDb, blockHash, blockNumber)
 		receipts := rawdb.ReadRawReceipts(chainDb, blockHash, blockNumber)
-		borReceipts := []*types.Receipt{rawdb.ReadBorReceipt(chainDb, blockHash, blockNumber)}
+		// [mys] use updated func to get receipts
+		borReceipts := []*types.Receipt{rawdb.ReadRawBorReceipt(chainDb, blockHash, blockNumber)}
 
 		// Calculate the total difficulty of the block
 		td := rawdb.ReadTd(chainDb, blockHash, blockNumber)
@@ -438,12 +441,12 @@ func (p *BlockPruner) backupOldDb(name string, cache, handles int, namespace str
 		}
 		// Write into new ancient_back db.
 		if _, err := rawdb.WriteAncientBlocks(frdbBack, []*types.Block{block}, []types.Receipts{receipts}, []types.Receipts{borReceipts}, td); err != nil {
-			log.Error("failed to write new ancient", "err", err)
-			return err
+			// [mys] returning text errors
+			return fmt.Errorf("failed to write new ancient error: %v", err)
 		}
 		// Print the log every 5s for better trace.
-		if common.PrettyDuration(time.Since(start)) > common.PrettyDuration(5*time.Second) {
-			log.Info("block backup process running successfully", "current blockNumber for backup", blockNumber)
+		if time.Since(start) > 5*time.Second {
+			log.Info("Block backup process running successfully", "current blockNumber for backup", blockNumber)
 			start = time.Now()
 		}
 	}
@@ -457,6 +460,8 @@ func (p *BlockPruner) BlockPruneBackup(name string, cache, handles int, namespac
 	start := time.Now()
 
 	if err := p.backupOldDb(name, cache, handles, namespace, readonly, interrupt); err != nil {
+		// [mys] additional log added
+		log.Error("Backup old ancientDB error", "err", err)
 		return err
 	}
 
@@ -468,40 +473,37 @@ func (p *BlockPruner) RecoverInterruption(name string, cache, handles int, names
 	log.Info("RecoverInterruption for block prune")
 	newExist, err := CheckFileExist(p.newAncientPath)
 	if err != nil {
-		log.Error("newAncientDb path error")
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("newAncientDB path error %v", err)
 	}
 
 	if newExist {
 		log.Info("New ancientDB_backup existed in interruption scenario")
 		flockOfAncientBack, err := CheckFileExist(filepath.Join(p.newAncientPath, "PRUNEFLOCKBACK"))
 		if err != nil {
-			log.Error("Failed to check flock of ancientDB_Back %v", err)
-			return err
+			// [mys] returning text errors
+			return fmt.Errorf("failed to check flock of ancientDB_Back %v", err)
 		}
 
 		// Indicating both old and new ancientDB existed concurrently.
 		// Delete directly for the new ancientdb to prune from start, e.g.: path ../chaindb/ancient_backup
 		if err := os.RemoveAll(p.newAncientPath); err != nil {
-			log.Error("Failed to remove old ancient directory %v", err)
-			return err
+			// [mys] returning text errors
+			return fmt.Errorf("failed to remove old ancient directory %v", err)
 		}
 		if flockOfAncientBack {
 			// Indicating the oldOffset/newOffset have already been updated.
 			if err := p.BlockPruneBackup(name, cache, handles, namespace, readonly, true); err != nil {
-				log.Error("Failed to prune")
 				return err
 			}
 		} else {
 			// Indicating the flock did not exist and the new offset did not be updated, so just handle this case as usual.
 			if err := p.BlockPruneBackup(name, cache, handles, namespace, readonly, false); err != nil {
-				log.Error("Failed to prune")
 				return err
 			}
 		}
 
 		if err := p.AncientDbReplacer(); err != nil {
-			log.Error("Failed to replace ancientDB")
 			return err
 		}
 	} else {
@@ -509,11 +511,9 @@ func (p *BlockPruner) RecoverInterruption(name string, cache, handles int, names
 		// Indicating new ancientDB even did not be created, just prune starting at backup from startBlockNumber as usual,
 		// in this case, the new offset have not been written into kvDB.
 		if err := p.BlockPruneBackup(name, cache, handles, namespace, readonly, false); err != nil {
-			log.Error("Failed to prune")
 			return err
 		}
 		if err := p.AncientDbReplacer(); err != nil {
-			log.Error("Failed to replace ancientDB")
 			return err
 		}
 	}
@@ -535,14 +535,14 @@ func CheckFileExist(path string) (bool, error) {
 func (p *BlockPruner) AncientDbReplacer() error {
 	// Delete directly for the old ancientdb, e.g.: path ../chaindb/ancient
 	if err := os.RemoveAll(p.oldAncientPath); err != nil {
-		log.Error("Failed to remove old ancient directory %v", err)
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("failed to remove old ancient directory %v", err)
 	}
 
 	// Rename the new ancientdb path same to the old
 	if err := os.Rename(p.newAncientPath, p.oldAncientPath); err != nil {
-		log.Error("Failed to rename new ancient directory")
-		return err
+		// [mys] returning text errors
+		return fmt.Errorf("failed to rename new ancient directory %v", err)
 	}
 	return nil
 }

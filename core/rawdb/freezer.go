@@ -186,8 +186,8 @@ func newFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 
 	// Create the write batch.
 	freezer.writeBatch = newFreezerBatch(freezer)
-
-	log.Info("Opened ancient database", "database", datadir, "readonly", readonly)
+	// [mys] additional log added
+	log.Info("Opened ancient database", "database", datadir, "readonly", readonly, "frozen", freezer.frozen, "offset", freezer.offset)
 	return freezer, nil
 }
 

@@ -367,8 +367,8 @@ func importPreimages(ctx *cli.Context) error {
 
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, false)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	start := time.Now()
 
 	if err := utils.ImportPreimages(db, ctx.Args().First()); err != nil {
@@ -385,8 +385,8 @@ func exportPreimages(ctx *cli.Context) error {
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	start := time.Now()
 
 	if err := utils.ExportPreimages(db, ctx.Args().First()); err != nil {
@@ -397,7 +397,8 @@ func exportPreimages(ctx *cli.Context) error {
 }
 
 func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, ethdb.Database, common.Hash, error) {
-	db := utils.MakeChainDatabase(ctx, stack, true)
+	// [mys] additional param added
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	var header *types.Header
 	if ctx.NArg() > 1 {
 		return nil, nil, common.Hash{}, fmt.Errorf("expected 1 argument (number or hash), got %d", ctx.NArg())

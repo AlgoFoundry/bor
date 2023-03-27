@@ -307,6 +307,37 @@ func (srv *Server) Peers() []*Peer {
 	return ps
 }
 
+// [mys] additional function to list non trusted peers for debugging
+// This function retrieves the peers that are not trusted-peers
+func (srv *Server) getNonTrustedPeers() []*Peer {
+	allPeers := srv.Peers()
+
+	nontrustedPeers := []*Peer{}
+
+	for _, peer := range allPeers {
+		if !peer.Info().Network.Trusted {
+			nontrustedPeers = append(nontrustedPeers, peer)
+		}
+	}
+
+	return nontrustedPeers
+}
+
+// [mys] additional function to set max peers
+// SetMaxPeers sets the maximum number of peers that can be connected
+func (srv *Server) SetMaxPeers(maxPeers int) {
+	currentPeers := srv.getNonTrustedPeers()
+	if len(currentPeers) > maxPeers {
+		peersToDrop := currentPeers[maxPeers:]
+		for _, peer := range peersToDrop {
+			log.Warn("CurrentPeers more than MaxPeers", "removing", peer.ID())
+			srv.RemovePeer(peer.Node())
+		}
+	}
+
+	srv.MaxPeers = maxPeers
+}
+
 // PeerCount returns the number of connected peers.
 func (srv *Server) PeerCount() int {
 	var count int
