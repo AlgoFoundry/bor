@@ -1880,33 +1880,43 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 					if len(activeHashes) == 0 {
 						log.Info("[ucc] core blockchain --- cancelling active data delete, no active hashed to delete")
 					} else {
-						log.Info("[ucc] core blockchain --- initiating delete block", "length block", len(activeHashes))
-						for _, hashes := range activeHashes {
-							rawdb.DeleteBlock(batchActive, hashes.Hash, hashes.Number)
+						// [mys] perform delete block on every 2 occurence
+						if deleteStart % 2 == 0 {
+							log.Info("[ucc] core blockchain --- initiating delete block", "length block", len(activeHashes))
+							for _, hashes := range activeHashes {
+								rawdb.DeleteBlock(batchActive, hashes.Hash, hashes.Number)
+							}
+	
+							if err := batchActive.Write(); err != nil {
+								log.Crit("[ucc] core blockchain --- active data delete failed ---- ", "err", err)
+							}
 						}
 					}
 
 					batchActive.Reset()
 
-					// compacting database
-					timeCompact := time.Now()
-					log.Info("[ucc] core blockchain --- compacting database ---- ")
+					// [mys] perform delete block on every 2 occurence
+					if deleteStart % 2 == 0 {
+						// compacting database
+						timeCompact := time.Now()
+						log.Info("[ucc] core blockchain --- compacting database ---- ")
 
-					for bCompact := 0xa0; bCompact <= 0xf0; bCompact += 0x01 {
-						var (
-							startCompact = []byte{byte(bCompact)}
-							endCompact   = []byte{byte(bCompact + 0x01)}
-						)
-						if bCompact == 0xf0 {
-							endCompact = nil
-						}
-						log.Info("[ucc] core blockchain --- compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact))
+						for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x01 {
+							var (
+								startCompact = []byte{byte(bCompact)}
+								endCompact   = []byte{byte(bCompact + 0x01)}
+							)
+							if bCompact == 0xf0 {
+								endCompact = nil
+							}
+							log.Info("[ucc] core blockchain --- compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact))
 
-						if err := bc.db.Compact(startCompact, endCompact); err != nil {
-							log.Error("[ucc] core blockchain --- Database compaction failed ---- ", "error", err)
+							if err := bc.db.Compact(startCompact, endCompact); err != nil {
+								log.Error("[ucc] core blockchain --- Database compaction failed ---- ", "error", err)
+							}
 						}
+						log.Info("[ucc] Dcore blockchain --- database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
 					}
-					log.Info("[ucc] Dcore blockchain --- database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
 				}
 			}
 		}
