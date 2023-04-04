@@ -1895,8 +1895,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 					batchActive.Reset()
 
+					// [mys] toggle this as true to reduce the size using compacting
+					isCompactActive := false
+
 					// [mys] perform delete block on every 2 occurence
-					if deleteStart % 2 == 0 {
+					if isCompactActive && deleteStart % 2 == 0 {
 						// compacting database
 						timeCompact := time.Now()
 						log.Info("[ucc] core blockchain --- compacting database ---- ")
