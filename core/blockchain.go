@@ -1847,6 +1847,82 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
 				"root", block.Root())
 		}
+
+		// mys] Wipe out older data from the active database
+		isDeleteActive := true
+
+		if setHead && isDeleteActive {
+			if block != nil {
+				var activeHashes []*rawdb.NumberHash
+
+				blockToKeep 		:= uint64(552120)	// keepe current to (current - 552120)
+				blockToDelete		:= uint64(10000)	// delete (current - 552120 - 1) to (current - 552120 - 10000) old blocks
+				latestBlockNumber	:= block.NumberU64()
+
+				log.Info("[ucc] core blockchain  --- ", "latestBlockNumber", latestBlockNumber)
+				if latestBlockNumber < blockToKeep {
+					log.Info("[ucc] core blockchain  -- active data still less than magic number ---- ")
+				} else if latestBlockNumber < (blockToKeep + blockToDelete) {
+					log.Info("[ucc] core blockchain  -- active data delete require at least 10k from magic number ---- ")
+				} else {
+					deleteEnd 	:= latestBlockNumber - blockToKeep
+					deleteStart := deleteEnd - blockToDelete
+
+					log.Info("[ucc] core blockchain  -- active data delete, preparing --- ", "blockToKeep", blockToKeep, "blockToDelete", blockToDelete, "start", deleteStart, "end", deleteEnd)
+					batchActive := bc.db.NewBatch()
+
+					// keep block 0 genesis, start from block 1 instead
+					if deleteStart == 0 {
+						deleteStart += 1
+					}
+
+					activeHashes = rawdb.ReadAllHashesInRange(bc.db, deleteStart, deleteEnd)
+					if len(activeHashes) == 0 {
+						log.Info("[ucc] core blockchain --- cancelling active data delete, no active hashed to delete")
+					} else {
+						// [mys] perform delete block on every 2 occurence
+						if deleteStart % 2 == 0 {
+							log.Info("[ucc] core blockchain --- initiating delete block", "length block", len(activeHashes))
+							for _, hashes := range activeHashes {
+								rawdb.DeleteBlock(batchActive, hashes.Hash, hashes.Number)
+							}
+	
+							if err := batchActive.Write(); err != nil {
+								log.Crit("[ucc] core blockchain --- active data delete failed ---- ", "err", err)
+							}
+						}
+					}
+
+					batchActive.Reset()
+
+					// [mys] toggle this as true to reduce the size using compacting
+					isCompactActive := false
+
+					// [mys] perform delete block on every 2 occurence
+					if isCompactActive && deleteStart % 2 == 0 {
+						// compacting database
+						timeCompact := time.Now()
+						log.Info("[ucc] core blockchain --- compacting database ---- ")
+
+						for bCompact := 0xe0; bCompact <= 0xf0; bCompact += 0x01 {
+							var (
+								startCompact = []byte{byte(bCompact)}
+								endCompact   = []byte{byte(bCompact + 0x01)}
+							)
+							if bCompact == 0xf0 {
+								endCompact = nil
+							}
+							log.Info("[ucc] core blockchain --- compacting database ---- ", "bCompact", bCompact, "range", fmt.Sprintf("%#x-%#x", startCompact, endCompact))
+
+							if err := bc.db.Compact(startCompact, endCompact); err != nil {
+								log.Error("[ucc] core blockchain --- Database compaction failed ---- ", "error", err)
+							}
+						}
+						log.Info("[ucc] Dcore blockchain --- database compaction finished ---- ", "elapsed", common.PrettyDuration(time.Since(timeCompact)))
+					}
+				}
+			}
+		}
 	}
 
 	// BOR
