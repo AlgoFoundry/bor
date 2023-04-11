@@ -376,7 +376,8 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.InspectDatabase(db, prefix, start)
+	// [mys] inspect & do not show unaccounted error for pruned data
+	return rawdb.InspectDatabase(db, prefix, start, true)
 }
 
 func showLeveldbStats(db ethdb.Stater) {
