@@ -375,7 +375,7 @@ func (s *stat) Count() string {
 
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
-func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
+func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte, showUnaccountedError bool) error {
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
@@ -540,7 +540,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	table.AppendBulk(stats)
 	table.Render()
 
-	if unaccounted.size > 0 {
+	// [mys] only show unaccounted error when needed
+	if showUnaccountedError && unaccounted.size > 0 {
 		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
 	}
 

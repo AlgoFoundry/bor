@@ -205,6 +205,18 @@ func Commands() map[string]MarkDownCommandFactory {
 				Meta: meta,
 			}, nil
 		},
+
+		// [mys] adding db cli
+		"db inspect": func() (MarkDownCommand, error) {
+			return &DBInspectCommand{
+				Meta: meta,
+			}, nil
+		},
+		"db compact": func() (MarkDownCommand, error) {
+			return &DBCompactCommand{
+				Meta: meta,
+			}, nil
+		},
 	}
 }
 
